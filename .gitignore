@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+._*
+
+# Swift / SwiftPM
+.build/
+.swiftpm/
+Package.resolved
+
+# Xcode user state (if you ever generate a project)
+xcuserdata/
+*.xcuserstate
+DerivedData/
+
+# Build outputs
+MaskOrganizer.app/
+/dist/
+/dist-dmg/
+/Mask-EX-Voice-Manager*.dmg
+
+# Generated icon intermediate (we keep AppIcon.icns; the iconset is rebuildable)
+MaskOrganizer/Bundle/AppIcon.iconset/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp

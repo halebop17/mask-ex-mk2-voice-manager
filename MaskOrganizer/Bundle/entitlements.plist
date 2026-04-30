@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        Hardened runtime is required for Developer ID notarization.
+        We do NOT enable App Sandbox — direct distribution doesn't require it,
+        and sandboxing CoreMIDI access is more restrictive than we need.
+        No special exemptions needed: no JIT, no unsigned executable memory,
+        no library-validation disable.
+    -->
+</dict>
+</plist>
