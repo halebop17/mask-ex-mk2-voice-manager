@@ -29,5 +29,6 @@ MaskOrganizer/Bundle/AppIcon.iconset/
 docs/
 sysex-data/
 dmg/
+icon/
 dmg-background.png
 dmg-settings.py
