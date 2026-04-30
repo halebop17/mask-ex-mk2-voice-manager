@@ -25,3 +25,9 @@ MaskOrganizer/Bundle/AppIcon.iconset/
 .vscode/
 .idea/
 *.swp
+
+docs/
+sysex-data/
+dmg/
+dmg-background.png
+dmg-settings.py
