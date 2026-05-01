@@ -31,6 +31,9 @@ struct ContentView: View {
     @State private var lastError: String? = nil
     @State private var showError: Bool = false
     @FocusState private var paneFocus: VoiceBank.Kind?
+    /// Inspector visibility. Toggled by ⌘I, double-clicking a user-bank voice,
+    /// or programmatically when a user-bank voice becomes singly selected.
+    @State private var showInspector: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -44,13 +47,29 @@ struct ContentView: View {
                     onCopyAllLeft:  { copyAll(from: .user,      to: .temporary) }
                 )
                 userPane
+                if showInspector, let target = currentEditTarget {
+                    VoiceDetailView(controller: controller, bank: target.bank, slot: target.slot)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
             StatusBar(
                 status: controller.status,
                 onCancel: { loadTask?.cancel() }
             )
         }
-        .frame(minWidth: 1100, minHeight: 660)
+        .animation(.easeInOut(duration: 0.18), value: showInspector)
+        .frame(minWidth: showInspector ? 1480 : 1100, minHeight: 660)
+        .onChange(of: userSelection)      { _, _ in autoCloseInspectorIfNeeded() }
+        .onChange(of: temporarySelection) { _, _ in autoCloseInspectorIfNeeded() }
+        // ⌘I toggle as an invisible hot button. Disabled when there's no
+        // single user-bank selection AND the inspector isn't currently open
+        // (so ⌘I from a closed state with no selection is a no-op).
+        .background(
+            Button("Toggle Inspector") { toggleInspector() }
+                .keyboardShortcut("i", modifiers: .command)
+                .opacity(0)
+                .frame(width: 0, height: 0)
+        )
         .fileImporter(
             isPresented: $showImporter,
             allowedContentTypes: [.m1b, .syx]
@@ -176,7 +195,8 @@ struct ContentView: View {
             focusedPaneID: $focusedPaneID,
             scrollTo: $temporaryScrollTo,
             leftActions: AnyView(temporaryLeft),
-            rightActions: AnyView(temporaryRight)
+            rightActions: AnyView(temporaryRight),
+            onDoubleClick: { _ in openEditorForCurrentSelection() }
         )
         .focusable()
         .focused($paneFocus, equals: .temporary)
@@ -197,7 +217,8 @@ struct ContentView: View {
             focusedPaneID: $focusedPaneID,
             scrollTo: $userScrollTo,
             leftActions: AnyView(userLeft),
-            rightActions: AnyView(userRight)
+            rightActions: AnyView(userRight),
+            onDoubleClick: { _ in openEditorForCurrentSelection() }
         )
         .focusable()
         .focused($paneFocus, equals: .user)
@@ -215,6 +236,58 @@ struct ContentView: View {
             moveSelection(in: kind, delta: delta)
         }
         return .handled
+    }
+
+    // MARK: Inspector
+
+    /// Bank + slot of the voice currently picked for editing — either the
+    /// single selection in the user bank or the single selection in the
+    /// temporary pane. Picks the focused pane when both have one selected.
+    private var currentEditTarget: (bank: VoiceBank, slot: Int)? {
+        let userSlot = singleSelectedSlot(in: userSelection, bank: controller.user)
+        let tempSlot = singleSelectedSlot(in: temporarySelection, bank: controller.temporary)
+        switch (userSlot, tempSlot) {
+        case (let u?, let t?):
+            // Both panes have a single selection — pick the focused one.
+            return focusedPaneID == .temporary ? (controller.temporary, t) : (controller.user, u)
+        case (let u?, nil):
+            return (controller.user, u)
+        case (nil, let t?):
+            return (controller.temporary, t)
+        default:
+            return nil
+        }
+    }
+
+    private func singleSelectedSlot(in selection: Set<Voice.ID>, bank: VoiceBank) -> Int? {
+        guard selection.count == 1, let id = selection.first else { return nil }
+        return bank.voices.firstIndex(where: { $0.id == id })
+    }
+
+    /// Open the inspector for whichever pane has a single voice selected.
+    ///
+    /// We deliberately do **not** send Program Change here. The Mask1EX MK2
+    /// needs a Bank Select (CC 32, "Banks 1–4 contain user voices") before
+    /// PC, and the per-bank slot count isn't yet confirmed. Until bank-aware
+    /// PC is wired up, the editor controls whatever voice is currently
+    /// active on the synth — pick that voice on the front panel first.
+    private func openEditorForCurrentSelection() {
+        guard currentEditTarget != nil else { return }
+        showInspector = true
+    }
+
+    private func autoCloseInspectorIfNeeded() {
+        if currentEditTarget == nil { showInspector = false }
+    }
+
+    /// ⌘I toggle. Closes if open; opens (and prepares the device) if a single
+    /// user voice is selected.
+    private func toggleInspector() {
+        if showInspector {
+            showInspector = false
+        } else {
+            openEditorForCurrentSelection()
+        }
     }
 
     private func openImporter(target: VoiceBank.Kind) {

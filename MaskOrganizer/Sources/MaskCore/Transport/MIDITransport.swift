@@ -11,6 +11,15 @@ public protocol MIDITransport: AnyObject, Sendable {
     func connect() async throws
     func disconnect()
     func sendSysEx(_ frame: [UInt8]) async throws
+
+    /// Send a 3-byte MIDI 1.0 Control Change (status `0xB0 | channel`).
+    /// Used by the patch editor for live audition while editing.
+    func sendChannelCC(channel: UInt8, cc: UInt8, value: UInt8) async throws
+
+    /// Send a 2-byte MIDI 1.0 Program Change (status `0xC0 | channel`).
+    /// Used by the patch editor on open to load the slot under edit so
+    /// live CCs apply to the right voice.
+    func sendProgramChange(channel: UInt8, program: UInt8) async throws
 }
 
 public enum ConnectionState: Equatable, Sendable {

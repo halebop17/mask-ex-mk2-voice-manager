@@ -81,4 +81,6 @@ final class NullTransport: MIDITransport, @unchecked Sendable {
     func connect() async throws { throw MIDITransportError.deviceNotFound(name: "Mask1EX MK2") }
     func disconnect() {}
     func sendSysEx(_ frame: [UInt8]) async throws { throw MIDITransportError.notConnected }
+    func sendChannelCC(channel: UInt8, cc: UInt8, value: UInt8) async throws { throw MIDITransportError.notConnected }
+    func sendProgramChange(channel: UInt8, program: UInt8) async throws { throw MIDITransportError.notConnected }
 }

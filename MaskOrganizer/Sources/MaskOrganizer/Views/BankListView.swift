@@ -16,6 +16,9 @@ struct BankListView: View {
     /// parent so this view stays bank-agnostic.
     let leftActions: AnyView
     let rightActions: AnyView
+    /// Optional double-click handler — used by the parent to open the
+    /// inspector when a single voice is double-clicked.
+    var onDoubleClick: ((Voice.ID) -> Void)? = nil
 
     @State private var search: String = ""
 
@@ -109,6 +112,13 @@ struct BankListView: View {
                             tagBackground: Theme.tagBackground(tint)
                         )
                         .contentShape(Rectangle())
+                        .onTapGesture(count: 2) {
+                            // Make sure the row is selected on double-click,
+                            // then notify the parent.
+                            selection = [voice.id]
+                            focusedPaneID = bank.kind
+                            onDoubleClick?(voice.id)
+                        }
                         .onTapGesture {
                             toggleSelection(voice.id, additive: NSEvent.modifierFlags.contains(.command))
                             focusedPaneID = bank.kind

@@ -304,6 +304,59 @@ public final class MIDIManager: MIDITransport, @unchecked Sendable {
         }
     }
 
+    // MARK: Channel-voice messages (CC, Program Change)
+
+    public func sendChannelCC(channel: UInt8, cc: UInt8, value: UInt8) async throws {
+        let status: UInt8 = 0xB0 | (channel & 0x0F)
+        try sendShortMIDI(bytes: [status, cc & 0x7F, value & 0x7F])
+    }
+
+    public func sendProgramChange(channel: UInt8, program: UInt8) async throws {
+        let status: UInt8 = 0xC0 | (channel & 0x0F)
+        try sendShortMIDI(bytes: [status, program & 0x7F])
+    }
+
+    /// Send a 2- or 3-byte MIDI 1.0 channel-voice message via the new
+    /// `MIDIEventList` API. Builds one MIDI 1.0 channel-voice UMP word
+    /// (MT = 0x2) and ships it.
+    private func sendShortMIDI(bytes: [UInt8]) throws {
+        guard isConnected, destinationEndpoint != 0 else {
+            throw MIDITransportError.notConnected
+        }
+        guard bytes.count == 2 || bytes.count == 3 else {
+            throw MIDITransportError.packetTooLarge(bytes.count)
+        }
+        // Word layout (MIDI 1.0 channel voice UMP, MT=0x2):
+        //   bits 31..28: MT     (= 0x2)
+        //   bits 27..24: group  (= 0x0)
+        //   bits 23..16: status byte
+        //   bits 15..8 : data1
+        //   bits 7..0  : data2 (0 if message is only 2 bytes)
+        let status = UInt32(bytes[0])
+        let data1  = UInt32(bytes[1])
+        let data2: UInt32 = bytes.count == 3 ? UInt32(bytes[2]) : 0
+        let word = (UInt32(0x2) << 28) | (status << 16) | (data1 << 8) | data2
+
+        var eventList = MIDIEventList()
+        var pkt = MIDIEventListInit(&eventList, ._1_0)
+        // MIDIEventListAdd writes into eventList at `pkt` and returns the
+        // next-write position. Critical: pkt must point into the SAME
+        // event-list memory we then send, so do everything against
+        // `&eventList` directly — never copy the list.
+        pkt = withUnsafePointer(to: word) { wordPtr in
+            MIDIEventListAdd(&eventList,
+                             MemoryLayout<MIDIEventList>.size,
+                             pkt,
+                             0,           // timestamp = "now"
+                             1,           // word count
+                             wordPtr)
+        }
+        let result = MIDISendEventList(outputPort, destinationEndpoint, &eventList)
+        if result != noErr {
+            throw MIDITransportError.sendFailed(result)
+        }
+    }
+
     private final class SendContext {
         let dataPtr: UnsafeMutablePointer<UInt8>
         let request: UnsafeMutablePointer<MIDISysexSendRequest>

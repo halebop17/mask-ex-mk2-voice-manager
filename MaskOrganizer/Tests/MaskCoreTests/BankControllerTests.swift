@@ -11,6 +11,8 @@ final class FakeTransport: MIDITransport, @unchecked Sendable {
     private let sysexCont: AsyncStream<[UInt8]>.Continuation
 
     var sentFrames: [[UInt8]] = []
+    var sentCCs: [(channel: UInt8, cc: UInt8, value: UInt8)] = []
+    var sentProgramChanges: [(channel: UInt8, program: UInt8)] = []
     var responder: ([UInt8]) -> [UInt8]? = { _ in nil }
     private(set) var isConnected: Bool = false
 
@@ -43,6 +45,14 @@ final class FakeTransport: MIDITransport, @unchecked Sendable {
                 self.sysexCont.yield(response)
             }
         }
+    }
+
+    func sendChannelCC(channel: UInt8, cc: UInt8, value: UInt8) async throws {
+        sentCCs.append((channel, cc, value))
+    }
+
+    func sendProgramChange(channel: UInt8, program: UInt8) async throws {
+        sentProgramChanges.append((channel, program))
     }
 }
 

@@ -43,6 +43,11 @@ public final class BankController: @unchecked Sendable {
     /// Maximum retries per missing voice during bulk read.
     public var readRetryLimit: Int = 2
 
+    /// MIDI channel the device listens on for live editing CCs (0…15).
+    /// The Mask1EX MK2's "Base MIDI Channel" defaults to 1, which maps to
+    /// channel index 0 here.
+    public var midiChannel: UInt8 = 0
+
     private let transport: any MIDITransport
     @ObservationIgnored private let log = Logger(subsystem: "org.local.MaskOrganizer", category: "BankController")
     @ObservationIgnored private var sysexTask: Task<Void, Never>?
@@ -276,6 +281,27 @@ public final class BankController: @unchecked Sendable {
         case .user:      return user
         case .temporary: return temporary
         }
+    }
+
+    // MARK: Live-edit (Phase 7)
+
+    /// Send a Program Change to load `slot` from the user bank as the device's
+    /// currently-active voice — so that subsequent live CCs apply to it.
+    /// Call this when the editor opens for a particular voice.
+    public func prepareForEditing(slot: Int) async throws {
+        try await transport.sendProgramChange(channel: midiChannel,
+                                              program: UInt8(clamping: slot))
+    }
+
+    /// Live-send a parameter change as a MIDI CC. Does **not** mutate the
+    /// in-memory voice (we don't know byte offsets yet — that's Phase 7.1).
+    /// When the byte-offset map is available, this method will additionally
+    /// update `voice.record[byteOffset]` so Save can persist the change.
+    public func setParameter(_ param: VoiceParameter, value: Int) async {
+        let (cc, ccValue) = param.ccMessage(for: value)
+        try? await transport.sendChannelCC(channel: midiChannel,
+                                           cc: cc,
+                                           value: ccValue)
     }
 
     // MARK: Bank write (gated)
