@@ -283,6 +283,23 @@ public final class BankController: @unchecked Sendable {
         }
     }
 
+    // MARK: Probe (byte-offset discovery)
+
+    /// Re-read a single voice record from the device on demand.
+    /// Used by the byte-probe UI to diff bytes before/after a CC change.
+    /// `deviceIndex` is the absolute device-side slot number:
+    ///   factory / temporary: 0…376 ;  user: 384…583 (slot + 384).
+    public func readRawRecord(deviceIndex: Int) async throws -> [UInt8] {
+        let frame = try await requestVoice(at: deviceIndex)
+        return try Voice.fromSysExResponse(frame, index: 0).record
+    }
+
+    /// Write a raw 64-byte record to a user-bank slot (0…199) for write-probing.
+    public func writeRawRecord(userSlot: Int, record: [UInt8]) async throws {
+        let frame = try MaskProtocol.encodeVoiceWrite(slot: userSlot, record: record)
+        try await transport.sendSysEx(frame)
+    }
+
     // MARK: Live-edit (Phase 7)
 
     /// Send a Program Change to load `slot` from the user bank as the device's

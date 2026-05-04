@@ -21,6 +21,13 @@ struct VoiceDetailView: View {
     /// don't know the device's stored value (Phase 7.1 byte map will fix that).
     @State private var touched: Set<String> = []
     @State private var expandedGroups: Set<ParameterGroup> = [.osc1, .filter]
+    @State private var probeExpanded: Bool = false
+    @State private var probeBaseline: [UInt8]? = nil   // captured from voice.record
+    @State private var probeCurrent:  [UInt8]? = nil   // re-read from device
+    @State private var probeReading:  Bool = false
+    @State private var probeError:    String? = nil
+    @State private var probeByteIndex: Int = 9
+    @State private var probeWriting:   Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,6 +38,7 @@ struct VoiceDetailView: View {
                     ForEach(ParameterGroup.allCases, id: \.self) { group in
                         section(for: group)
                     }
+                    probeSection
                 }
                 .padding(.vertical, 6)
             }
@@ -153,15 +161,13 @@ struct VoiceDetailView: View {
                     in: Double(p.range.lowerBound)...Double(p.range.upperBound),
                     step: 1
                 )
-                .controlSize(.mini)
-                .opacity(isTouched ? 1.0 : 0.55)
-                // Double-click on the slider track resets it to the mid-range
-                // "initial" position. Use `simultaneousGesture` so it coexists
-                // with the slider's own drag-to-set gesture (a plain
-                // .onTapGesture would be eaten by the slider).
-                .simultaneousGesture(
-                    TapGesture(count: 2).onEnded { resetParameter(p) }
-                )
+                .opacity(isTouched ? 1.0 : 0.45)
+                // Right-click → "Reset". SwiftUI's Slider eats tap gestures
+                // (incl. simultaneousGesture), so a context menu is the only
+                // reliable way to surface a reset action.
+                .contextMenu {
+                    Button("Reset to default") { resetParameter(p) }
+                }
 
                 Text(isTouched
                      ? formatted(value: values[p.stableID] ?? 0, format: p.format)
@@ -169,9 +175,12 @@ struct VoiceDetailView: View {
                     .font(.system(size: 10.5, design: .monospaced))
                     .frame(width: 44, alignment: .trailing)
                     .foregroundStyle(isTouched ? .secondary : .tertiary)
+                    .contextMenu {
+                        Button("Reset to default") { resetParameter(p) }
+                    }
             }
         }
-        .frame(height: 22)
+        .frame(height: 30)
         .padding(.horizontal, 4)
     }
 
@@ -183,6 +192,156 @@ struct VoiceDetailView: View {
         values[p.stableID] = mid
         touched.remove(p.stableID)
         Task { await controller.setParameter(p, value: mid) }
+    }
+
+    // MARK: Probe section
+
+    @ViewBuilder
+    private var probeSection: some View {
+        DisclosureGroup(isExpanded: $probeExpanded) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Button("Set baseline") {
+                        probeBaseline = currentVoice?.record
+                        probeCurrent = nil
+                        probeError = nil
+                    }
+                    .controlSize(.small)
+                    .disabled(currentVoice == nil)
+
+                    Button(probeReading ? "Reading…" : "Re-read from device") {
+                        Task { await rereadFromDevice() }
+                    }
+                    .controlSize(.small)
+                    .disabled(probeReading)
+
+                    Spacer()
+                    if let err = probeError {
+                        Text(err)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.red)
+                    } else if let bl = probeBaseline, let cur = probeCurrent {
+                        let diffCount = zip(bl, cur).filter { $0 != $1 }.count
+                        Text("\(diffCount) byte\(diffCount == 1 ? "" : "s") changed")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(diffCount > 0 ? .orange : .secondary)
+                    }
+                }
+                Text("Reading device index \(probeDeviceIndex) (bank: \(bank.kind.rawValue), slot: \(slot))")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+
+                if let bytes = probeCurrent ?? probeBaseline {
+                    hexGrid(bytes: bytes, baseline: probeBaseline)
+                } else {
+                    Text("Tap Set baseline to capture the loaded voice bytes, move a slider, then Re-read from device.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if bank.kind == .user, let baseline = probeBaseline {
+                    Divider()
+                    writeProbeRow(baseline: baseline)
+                }
+            }
+            .padding(.top, 6)
+            .padding(.bottom, 8)
+        } label: {
+            Text("Byte Probe")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .padding(.vertical, 4)
+        }
+        .padding(.horizontal, 12)
+    }
+
+    @ViewBuilder
+    private func hexGrid(bytes: [UInt8], baseline: [UInt8]?) -> some View {
+        let cols = 8
+        VStack(alignment: .leading, spacing: 1) {
+            ForEach(0..<(bytes.count + cols - 1) / cols, id: \.self) { row in
+                HStack(spacing: 3) {
+                    Text(String(format: "%02X:", row * cols))
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 22, alignment: .leading)
+                    ForEach(0..<cols, id: \.self) { col in
+                        let idx = row * cols + col
+                        if idx < bytes.count {
+                            let changed = baseline != nil && baseline![idx] != bytes[idx]
+                            Text(String(format: "%02X", bytes[idx]))
+                                .font(.system(size: 9.5, design: .monospaced))
+                                .foregroundStyle(changed ? Color.orange : .secondary)
+                                .background(changed ? Color.orange.opacity(0.15) : .clear,
+                                            in: RoundedRectangle(cornerRadius: 2))
+                                .frame(width: 22)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func writeProbeRow(baseline: [UInt8]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Write probe — overwrites slot \(slot) on device")
+                .font(.system(size: 9))
+                .foregroundStyle(.orange)
+            HStack(spacing: 6) {
+                Text("Byte \(probeByteIndex)")
+                    .font(.system(size: 11, design: .monospaced))
+                    .frame(width: 54, alignment: .leading)
+                Stepper("", value: $probeByteIndex, in: 9...63)
+                    .labelsHidden()
+                Text(String(format: "now: %02X", baseline[probeByteIndex]))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("→ 00") { Task { await writeProbe(baseline: baseline, value: 0x00) } }
+                    .controlSize(.small)
+                    .disabled(probeWriting)
+                Button("→ 7F") { Task { await writeProbe(baseline: baseline, value: 0x7F) } }
+                    .controlSize(.small)
+                    .disabled(probeWriting)
+                Button("Restore") { Task { await writeProbe(baseline: baseline, value: nil) } }
+                    .controlSize(.small)
+                    .disabled(probeWriting)
+            }
+        }
+    }
+
+    private func writeProbe(baseline: [UInt8], value: UInt8?) async {
+        probeWriting = true
+        probeError = nil
+        defer { probeWriting = false }
+        var record = baseline
+        if let v = value { record[probeByteIndex] = v }
+        do {
+            try await controller.writeRawRecord(userSlot: slot, record: record)
+        } catch {
+            probeError = "Write failed: \(error)"
+        }
+    }
+
+    private var probeDeviceIndex: Int {
+        switch bank.kind {
+        case .user:                  return 384 + slot
+        case .factory, .temporary:   return slot
+        }
+    }
+
+    private func rereadFromDevice() async {
+        probeReading = true
+        probeError = nil
+        defer { probeReading = false }
+        do {
+            probeCurrent = try await controller.readRawRecord(deviceIndex: probeDeviceIndex)
+        } catch {
+            probeError = "Failed: \(error)"
+        }
     }
 
     // MARK: Footer

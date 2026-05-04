@@ -308,11 +308,13 @@ public final class MIDIManager: MIDITransport, @unchecked Sendable {
 
     public func sendChannelCC(channel: UInt8, cc: UInt8, value: UInt8) async throws {
         let status: UInt8 = 0xB0 | (channel & 0x0F)
+        log.debug("tx CC ch=\(channel) cc=\(cc) val=\(value)")
         try sendShortMIDI(bytes: [status, cc & 0x7F, value & 0x7F])
     }
 
     public func sendProgramChange(channel: UInt8, program: UInt8) async throws {
         let status: UInt8 = 0xC0 | (channel & 0x0F)
+        log.debug("tx PC ch=\(channel) prog=\(program)")
         try sendShortMIDI(bytes: [status, program & 0x7F])
     }
 
